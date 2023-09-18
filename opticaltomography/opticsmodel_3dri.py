@@ -254,7 +254,7 @@ class MultiBorn(MultiPhaseContrast):
         kernel_mask = (self.RI/self.wavelength)**2 > 1.01*(fxlin * np.conj(fxlin) - fylin * np.conj(fylin))
         self.green_kernel_2d = -0.25j * torch.exp(torch.from_numpy(2.0j * np.pi * self.fzlin * self.pixel_size_z)) / np.pi / self.fzlin
         self.green_kernel_2d *= kernel_mask
-        self.green_kernel_2d[np.isnan(self.green_kernel_2d)==1] = 0.0
+        self.green_kernel_2d[torch.isnan(self.green_kernel_2d)==1] = 0.0
     
     def forward(self, V_obj, fy_illu, fx_illu, fz_source):
         
@@ -280,7 +280,7 @@ class MultiBorn(MultiPhaseContrast):
             field_scat = torch.fft.ifft2(torch.fft.fft2(field_layer_in[:,:,zz] * obj[:,:,zz])*self.green_kernel_2d) * self.pixel_size_z
             field += field_scat
         
-        back_to_center = np.sum(self.slice_separation)/2 # focus at the center
+        back_to_center = self.pixel_size_z * (Nz - 1)/2
         field = self._propagationInplace(field, back_to_center, adjoint = True)
         
         return field
