@@ -11,7 +11,6 @@ def mse_loss(predict, obj, device='cpu'):
     # print(mse.device)
     return mse
 
-
 def sparsity_loss(obj, weight, device='cpu'):
     loss = nn.L1Loss()
     # print(obj.device)
