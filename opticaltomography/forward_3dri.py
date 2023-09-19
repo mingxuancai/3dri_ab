@@ -102,8 +102,6 @@ class TomographySolver:
             fy_source = self.fy_illu_list[illu_idx]
             fz_source_layer = self.fz_illu_list[illu_idx]
             fields = self._forwardMeasure(fy_source, fx_source, fz_source_layer, obj, device)
-            # print(torch.mean(torch.abs(fields)))
-            # print(torch.max(torch.abs(fields)))
             
             # transform field to intensity
             est_intensity = torch.abs(fields)
@@ -122,10 +120,8 @@ class TomographySolver:
         obj: phase object to be solved
         """
         fields = self._scattering_obj.forward(obj, fy_illu, fx_illu, fz_illu_layer)
-        # print(torch.abs(fields[100, 100]))
         
         field_pupil = self._aberration_obj.forward(fields)
-        # print(torch.abs(field_pupil[100, 100]))
         
         return field_pupil
     

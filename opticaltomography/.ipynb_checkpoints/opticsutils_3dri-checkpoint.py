@@ -68,3 +68,11 @@ def genGrid(size, dx, flag_shift=False):
         xlin = np.roll(xlin, -1 * size//2)
     xlin = xlin[:,np.newaxis]
     return xlin # return torch.complex64
+
+def norm(img):
+    return (img - torch.amin(img)) / (torch.amax(img) - torch.amin(img))
+
+def find_min_index(img):
+    min_index = np.argmin(img)
+    min_coord = np.unravel_index(min_index, img.shape)
+    return min_coord

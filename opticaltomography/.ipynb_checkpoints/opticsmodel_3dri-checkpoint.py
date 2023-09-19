@@ -154,25 +154,40 @@ class ScatteringModels:
         
         return fy_source_on_grid, fx_source_on_grid
     
+    def _genRealGrid_no_ps(self, flag_shift = False):
+        xlin = genGrid(self.shape[1], 1, flag_shift = flag_shift)
+        ylin = genGrid(self.shape[0], 1, flag_shift = flag_shift)
+        xlin = np.tile(xlin.T, (self.shape[0], 1))
+        ylin = np.tile(ylin, (1, self.shape[1]))
+        
+        return xlin, ylin
+    
+    def _setIlluminationOnGrid_no_ps(self, fy_illu, fx_illu):
+        
+        fx_source_on_grid = np.round(fx_illu*self.shape[1])/self.shape[1]
+        fy_source_on_grid = np.round(fy_illu*self.shape[0])/self.shape[0]
+        
+        return fy_source_on_grid, fx_source_on_grid
+    
     def _genSphericalWave(self, fy_illu, fx_illu, fz_depth, prop_distance, device='cpu'):
         
-        xlin, ylin = self._genRealGrid()
-        #xlin = np.fft.fftshift(xlin)
-        #ylin = np.fft.fftshift(ylin)
-        fy_source, fx_source = self._setIlluminationOnGrid(fy_illu, fx_illu)
+        xlin, ylin = self._genRealGrid_no_ps() # 200x200
+        fy_source, fx_source = self._setIlluminationOnGrid_no_ps(fy_illu, fx_illu) # set source on the 200x200 grid
         
         fz_source = self.RI / self.wavelength 
+        
+        r_on_grid = self.pixel_size * ((xlin - fx_source*self.shape[1])**2 + (ylin - fy_source*self.shape[0])**2)**0.5
 
         if fz_depth != 0:
             dz_prop_distance = self.pixel_size_z + (np.ceil(fz_depth) - fz_depth) * self.pixel_size_z # compute the spherical wave at the next slice and plus one slice to avoid small value
         
-            r = ((xlin - fx_source*self.shape[1])**2 + (ylin - fy_source*self.shape[0])**2 + (dz_prop_distance)**2)**0.5
+            r = (r_on_grid**2 + (dz_prop_distance)**2)**0.5
         else:
-            r = ((xlin - fx_source*self.shape[1])**2 + (ylin - fy_source*self.shape[0])**2 + (prop_distance)**2)**0.5
+            r = (r_on_grid**2 + (prop_distance)**2)**0.5
         
         source_xy = 1.0 * torch.exp(torch.from_numpy(1.0j * 2.0 * np.pi / self.wavelength * r))/r
         
-        # print(np.abs(source_xy[100,100]))
+        self.test.append(source_xy)
         
         return source_xy, fy_source, fx_source, fz_source
     
