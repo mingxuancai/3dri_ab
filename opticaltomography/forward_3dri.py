@@ -92,6 +92,9 @@ class TomographySolver:
         self.scat_model = model
     
     def forwardPredict(self, obj, device='cpu'):
+        
+        obj = self._x
+        
         forward_scattered_predict = torch.zeros((self.number_illum, self.phase_obj_3d.shape[0], self.phase_obj_3d.shape[1]), dtype=t_f32) # store the scattered field
         
         for illu_idx in range(self.number_illum):  # number of emission
