@@ -155,6 +155,7 @@ class ScatteringModels:
         return fy_source_on_grid, fx_source_on_grid
     
     def _genRealGrid_no_ps(self, flag_shift = False):
+        
         xlin = genGrid(self.shape[1], 1, flag_shift = flag_shift)
         ylin = genGrid(self.shape[0], 1, flag_shift = flag_shift)
         xlin = np.tile(xlin.T, (self.shape[0], 1))
