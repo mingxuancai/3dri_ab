@@ -90,6 +90,7 @@ class TomographySolver:
         # Set scattering model
         self._scattering_obj = self._opticsmodel[model](self.phase_obj_3d, **self.scat_model_args)
         self.scat_model = model
+        
     
     def forwardPredict(self, obj, device='cpu'):
         
@@ -102,8 +103,6 @@ class TomographySolver:
             fy_source = self.fy_illu_list[illu_idx]
             fz_source_layer = self.fz_illu_list[illu_idx]
             fields = self._forwardMeasure(fy_source, fx_source, fz_source_layer, obj, device)
-            # print(torch.mean(torch.abs(fields)))
-            # print(torch.max(torch.abs(fields)))
             
             # transform field to intensity
             est_intensity = torch.abs(fields)
@@ -115,6 +114,7 @@ class TomographySolver:
         
         return forward_scattered_predict, fields
     
+    
     def _forwardMeasure(self, fy_illu, fx_illu, fz_illu_layer, obj, device='cpu'):
         """
         From an inner emitting source, this function computes the exit wave
@@ -122,12 +122,82 @@ class TomographySolver:
         obj: phase object to be solved
         """
         fields = self._scattering_obj.forward(obj, fy_illu, fx_illu, fz_illu_layer)
-        # print(torch.abs(fields[100, 100]))
         
         field_pupil = self._aberration_obj.forward(fields)
-        # print(torch.abs(field_pupil[100, 100]))
         
         return field_pupil
+    
+    """
+    Model-based convolution
+    """
+    
+    def forwardPredict_model(self, obj, fluo, device='cpu'):
+        
+        obj = self._x
+        
+        forward_scattered_predict = torch.zeros((self.phase_obj_3d.shape[0], self.phase_obj_3d.shape[1]), device=device) # store the scattered field
+        
+        for illu_idx in range(self.number_illum):  # number of emission
+            fx_source = self.fx_illu_list[illu_idx]
+            fy_source = self.fy_illu_list[illu_idx]
+            fz_source_layer = self.fz_illu_list[illu_idx]
+            fluo_value = fluo[illu_idx%100, illu_idx//100]
+            fields = self._forwardMeasure_model(fy_source, fx_source, fz_source_layer, obj, fluo_value)
+            
+            # transform field to intensity
+            est_intensity = torch.abs(fields)
+            
+            # self.abs_field = est_intensity
+            intensity = est_intensity * est_intensity
+            
+            forward_scattered_predict = forward_scattered_predict + intensity
+        
+        return forward_scattered_predict, fields
+    
+    
+    def _forwardMeasure_model(self, fy_illu, fx_illu, fz_illu_layer, obj, fluo_value, device='cpu'):
+        """
+        From an inner emitting source, this function computes the exit wave
+        fy_source, fy_source, fz_source: source position in y, x, z
+        obj: phase object to be solved
+        """
+        fields = self._scattering_obj.forward_gpu(obj, fy_illu, fx_illu, fz_illu_layer, device=device)
+        
+        field_pupil = self._aberration_obj.forward(fields, device=device)
+        field_pupil = field_pupil.to(device)
+        
+        return field_pupil * fluo_value
+    
+    
+    """
+    Predict the wide field measurement given a 2D amplitude input
+    """
+        
+    def forwardPredict_model_2d(self, obj_recon, obj, fz_source, device='cpu'):
+        """
+        Predict the forward measurement given a 2D amplitude input
+        
+        obj_recon: 2D fluorescenet object (here is the amplitude) to be solved
+        obj: the preknown or presolved 3D multiple-scattering object
+        """
+        
+        obj = self._x
+        
+        fields = self._forwardMeasure_model_2d(obj_recon, obj, fz_source, device)
+        est_intensity = torch.abs(fields)
+        intensity = est_intensity ** 2
+        
+        return intensity
+        
+    
+    def _forwardMeasure_model_2d(self, obj_recon, obj, fz_source, device='cpu'):
+        
+        fields = self._scattering_obj.forward_model_2d(obj_recon, obj, fz_source)
+        
+        field_pupil = self._aberration_obj.forward(fields)
+        
+        return field_pupil
+    
     
     
             

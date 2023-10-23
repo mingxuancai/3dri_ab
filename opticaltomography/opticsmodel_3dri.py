@@ -6,6 +6,7 @@ Contact: mingxuan_cai@berkeley.edu
 """
 import numpy as np
 import torch
+import scipy
 from opticaltomography.opticsutils_3dri import genGrid, genPupil, propKernel
 
 np_f32 = np.float32
@@ -54,7 +55,7 @@ class Aberration(Aperture):
         self.wavelength = wavelength
         self.pupil_support = self.pupil.copy()
     
-    def forward(self, field):
+    def forward(self, field, device='cpu'):
         """Apply pupil"""
         field_f = torch.fft.fft2(field)
         # self.test_f = field_f
@@ -154,6 +155,7 @@ class ScatteringModels:
         
         return fy_source_on_grid, fx_source_on_grid
     
+    
     def _genRealGrid_no_ps(self, flag_shift = False):
         
         xlin = genGrid(self.shape[1], 1, flag_shift = flag_shift)
@@ -163,12 +165,14 @@ class ScatteringModels:
         
         return xlin, ylin
     
+    
     def _setIlluminationOnGrid_no_ps(self, fy_illu, fx_illu):
         
         fx_source_on_grid = np.round(fx_illu*self.shape[1])/self.shape[1]
         fy_source_on_grid = np.round(fy_illu*self.shape[0])/self.shape[0]
         
         return fy_source_on_grid, fx_source_on_grid
+    
     
     def _genSphericalWave(self, fy_illu, fx_illu, fz_depth, prop_distance, device='cpu'):
         
@@ -188,9 +192,32 @@ class ScatteringModels:
         
         source_xy = 1.0 * torch.exp(torch.from_numpy(1.0j * 2.0 * np.pi / self.wavelength * r))/r
         
-        self.test.append(source_xy)
-        
         return source_xy, fy_source, fx_source, fz_source
+    
+    
+    def _genSphericalkernel(self, obj_recon, fz_depth, prop_distance):
+        
+        xlin, ylin = self._genRealGrid_no_ps()
+        fy_source, fx_source = self._setIlluminationOnGrid_no_ps(0, 0)
+        
+        fz_source = self.RI / self.wavelength 
+        
+        r_on_grid = self.pixel_size * ((xlin - fx_source*self.shape[1])**2 + (ylin - fy_source*self.shape[0])**2)**0.5
+        
+        if fz_depth != 0:
+            dz_prop_distance = self.pixel_size_z + (np.ceil(fz_depth) - fz_depth) * self.pixel_size_z 
+            r = (r_on_grid**2 + (dz_prop_distance)**2)**0.5
+        else:
+            r = (r_on_grid**2 + (prop_distance)**2)**0.5
+        
+        source_xy_kernel = 1.0 * torch.exp(torch.from_numpy(1.0j * 2.0 * np.pi / self.wavelength * r))/r
+        
+        source_xy = scipy.signal.convolve2d(obj_recon, source_xy_kernel, mode='same', boundary='symm')
+        
+        source_xy = torch.from_numpy(source_xy).to(torch.complex64)
+        
+        return source_xy, source_xy_kernel
+        
     
     def _propagationInplace(self, field, propagation_distance, adjoint=False, in_real=True):
         # print(np.max(np.abs(self.prop_kernel_phase)))
@@ -215,7 +242,7 @@ class MultiPhaseContrast(ScatteringModels):
         super().__init__(phase_obj_3d, wavelength, **kwargs)
         self.sigma = sigma
         self.slice_separation = phase_obj_3d.slice_separation
-        self.test = []
+        # self.test = []
         self.test_prop = []
         self.prop_kernel_phase = self.prop_kernel_phase
     
@@ -226,9 +253,7 @@ class MultiPhaseContrast(ScatteringModels):
         Nz = obj.shape[2]
         
         field, _, _, fz_illu = self._genSphericalWave(fy_illu, fx_illu, fz_source, prop_distance=self.pixel_size_z*2) 
-        
-        # print(torch.max(torch.abs(field)))
-        # print(fz_illu)
+        self.test_new = field
         
         transmittance = torch.exp(1.0j * self.sigma * obj)
         
@@ -256,6 +281,40 @@ class MultiPhaseContrast(ScatteringModels):
         # self.test_prop.append(field)
         
         return field
+    
+    
+    def forward_model_2d(self, obj_recon, contrast_obj, fz_source):
+        
+        obj = contrast_obj
+        
+        Nz = obj.shape[2]
+        
+        field, kernel = self._genSphericalkernel(obj_recon, fz_source, self.pixel_size_z)
+        self.test_2d = field
+        
+        transmittance = torch.exp(1.0j * self.sigma * obj)
+        
+        
+        if fz_source != 0:
+            Nz -= (np.ceil(fz_source))
+            Nz = int(Nz)
+        
+        for zz in range(Nz):
+            if fz_source != 0:
+                zz += np.ceil(fz_source)
+                zz = int(zz)
+            
+            field *= transmittance[:,:,zz]
+            
+            if zz < Nz - 1:
+                field = self._propagationInplace(field, self.slice_separation[zz])
+            
+        back_to_center = self.pixel_size_z * (Nz - 1)/2 # focus at the center
+        
+        field = self._propagationInplace(field, back_to_center, adjoint = True)
+        
+        return field
+        
 
     
 class MultiBorn(MultiPhaseContrast):
@@ -279,6 +338,35 @@ class MultiBorn(MultiPhaseContrast):
         Nz = obj.shape[2]
         
         field, _, _, fz_illu = self._genSphericalWave(fy_illu, fx_illu, fz_source, prop_distance=self.pixel_size_z)
+        
+        field_layer_in = torch.zeros(obj.shape, dtype=t_c64)
+        
+        if fz_source != 0:
+            Nz -= (np.ceil(fz_source))
+            Nz = int(Nz)
+        
+        for zz in range(Nz):
+            if fz_source != 0:
+                zz += np.ceil(fz_source)
+                zz = int(zz)
+                
+            field_layer_in[:,:,zz] = field
+            field = self._propagationInplace(field, self.slice_separation[zz])
+            field_scat = torch.fft.ifft2(torch.fft.fft2(field_layer_in[:,:,zz] * obj[:,:,zz])*self.green_kernel_2d) * self.pixel_size_z
+            field += field_scat
+        
+        back_to_center = self.pixel_size_z * (Nz - 1)/2
+        field = self._propagationInplace(field, back_to_center, adjoint = True)
+        
+        return field
+    
+    def forward_model_2d(self, obj_recon, V_obj, fz_source):
+        
+        obj = V_obj
+        
+        Nz = obj.shape[2]
+        
+        field, _ = self._genSphericalkernel(obj_recon, fz_source, self.pixel_size_z)
         
         field_layer_in = torch.zeros(obj.shape, dtype=t_c64)
         
